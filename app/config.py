@@ -1,5 +1,0 @@
-host = '10.241.62.176'
-user = 'set'
-password = 'dwordpass'
-db_name = 'users'  
-port = '5432'

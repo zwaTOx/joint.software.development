@@ -1,39 +1,137 @@
-#import psycopg2
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from fastapi import FastAPI
-import uvicorn
-#from config import host, user, password, db_name, port
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
+#docker run --name my_postgres -p 5438:5432 -e POSTGRES_PASSWORD=12345 --network my-network -d postgres
+#uvicorn app.main:app --reload
+
+DATABASE_CONFIG = {
+    "dbname": "postgres",  
+    "user": "postgres",    
+    "password": "12345",   
+    "host": "db",  # Имя контейнера PostgreSQL
+    "port": "5432",         # Пробросил (5438 -> 5432)
+    "client_encoding": "utf8",
+}
+
+# Модель для создания записи
+class ItemCreate(BaseModel):
+    name: str
+    description: str
+
+# Модель для ответа
+class ItemResponse(BaseModel):
+    id: int
+    name: str
+    description: str
+
+# Инициализация FastAPI
 app = FastAPI()
+
+# Подключение к базе данных
+def get_db_connection():
+    try:
+        conn = psycopg2.connect(**DATABASE_CONFIG, cursor_factory=RealDictCursor)
+        return conn
+    except Exception as e:
+        print(f"Ошибка подключения к базе данных: {e}")
+        raise
+
+# Создание таблицы (если её нет)
+def create_table():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS items (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(100) NOT NULL,
+            description TEXT
+        );
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
+
+# Инициализация таблицы при старте приложения
+@app.on_event("startup")
+def startup():
+    create_table()
 
 @app.get("/")
 def read_root():
     return {"message": "Hello, World!"}
 
-if __name__ == '__main__':
-    uvicorn.run("main:app", host="0.0.0.0")
+# Эндпоинт для создания записи
+@app.post("/items/", response_model=ItemResponse)
+def create_item(item: ItemCreate):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO items (name, description) VALUES (%s, %s) RETURNING id;",
+        (item.name, item.description)
+    )
+    new_item = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
+    return {**new_item, **item.dict()}
 
+# Эндпоинт для получения всех записей
+@app.get("/items/", response_model=list[ItemResponse])
+def get_items():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM items;")
+    items = cur.fetchall()
+    cur.close()
+    conn.close()
+    return items
 
+# Эндпоинт для получения одной записи по ID
+@app.get("/items/{item_id}", response_model=ItemResponse)
+def get_item(item_id: int):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM items WHERE id = %s;", (item_id,))
+    item = cur.fetchone()
+    cur.close()
+    conn.close()
+    if item is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return item
 
-#http://127.0.0.1:8000/students
-# @app.get("/students")
-# def get_all_students():
-#     return json_to_dict_list(path_to_json)
+# Эндпоинт для обновления записи
+@app.put("/items/{item_id}", response_model=ItemResponse)
+def update_item(item_id: int, item: ItemCreate):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE items SET name = %s, description = %s WHERE id = %s RETURNING id;",
+        (item.name, item.description, item_id)
+    )
+    updated_item = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
+    if updated_item is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return {**updated_item, **item.dict()}
 
-#http://127.0.0.1:8000/students/4
-#http://127.0.0.1:8000/students/1?enrollment_year=2019&major=Психология
-# @app.get("/students/{course}")
-# def get_filtered_students(course: int | None = None, major: str = None, enrollment_year: int = None):
-#     #students = json_to_dict_list(path_to_json)
-#     filtered_students = []
-#     for student in students:
-#         if student["course"] == course:
-#             filtered_students.append(student)
+# Эндпоинт для удаления записи
+@app.delete("/items/{item_id}")
+def delete_item(item_id: int):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM items WHERE id = %s RETURNING id;", (item_id,))
+    deleted_item = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
+    if deleted_item is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return {"message": "Item deleted", "id": deleted_item["id"]}
 
-    # if major:
-    #     filtered_students = [student for student in filtered_students if student['major'].lower() == major.lower()]
-
-    # if enrollment_year:
-    #     filtered_students = [student for student in filtered_students if student['enrollment_year'] == enrollment_year]
-
-    # return filtered_students
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
