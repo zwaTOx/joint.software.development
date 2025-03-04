@@ -3,28 +3,27 @@ from pydantic import BaseModel
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-#docker run --name my_postgres -p 5438:5432 -e POSTGRES_PASSWORD=12345 --network my-network -d postgres
-#uvicorn app.main:app --reload
-
+# Настройки подключения к PostgreSQL
 DATABASE_CONFIG = {
-    "dbname": "postgres",  
-    "user": "postgres",    
-    "password": "12345",   
+    "dbname": "postgres",
+    "user": "postgres",
+    "password": "12345",
     "host": "db",  # Имя контейнера PostgreSQL
-    "port": "5432",         # Пробросил (5438 -> 5432)
+    "port": "5432",
     "client_encoding": "utf8",
 }
 
-# Модель для создания записи
-class ItemCreate(BaseModel):
+# Модель для создания пользователя
+class UserCreate(BaseModel):
     name: str
-    description: str
+    login: str
+    password: str
 
-# Модель для ответа
-class ItemResponse(BaseModel):
+# Модель для ответа (без пароля)
+class UserResponse(BaseModel):
     id: int
     name: str
-    description: str
+    login: str
 
 # Инициализация FastAPI
 app = FastAPI()
@@ -38,99 +37,100 @@ def get_db_connection():
         print(f"Ошибка подключения к базе данных: {e}")
         raise
 
-# Создание таблицы (если её нет)
-def create_table():
+# Создание таблицы users (если её нет)
+def create_tables():
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS items (
+        CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
             name VARCHAR(100) NOT NULL,
-            description TEXT
+            login VARCHAR(100) UNIQUE NOT NULL,
+            password VARCHAR(100) NOT NULL
         );
     """)
     conn.commit()
     cur.close()
     conn.close()
 
-# Инициализация таблицы при старте приложения
+# Инициализация таблиц при старте приложения
 @app.on_event("startup")
 def startup():
-    create_table()
+    create_tables()  # Создаем таблицу users
 
 @app.get("/")
 def read_root():
     return {"message": "Hello, World!"}
 
-# Эндпоинт для создания записи
-@app.post("/items/", response_model=ItemResponse)
-def create_item(item: ItemCreate):
+# Эндпоинт для создания пользователя
+@app.post("/users/", response_model=UserResponse)
+def create_user(user: UserCreate):
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
-        "INSERT INTO items (name, description) VALUES (%s, %s) RETURNING id;",
-        (item.name, item.description)
+        "INSERT INTO users (name, login, password) VALUES (%s, %s, %s) RETURNING id, name, login;",
+        (user.name, user.login, user.password)
     )
-    new_item = cur.fetchone()
+    new_user = cur.fetchone()
     conn.commit()
     cur.close()
     conn.close()
-    return {**new_item, **item.dict()}
+    return new_user
 
-# Эндпоинт для получения всех записей
-@app.get("/items/", response_model=list[ItemResponse])
-def get_items():
+# Эндпоинт для получения всех пользователей
+@app.get("/users/", response_model=list[UserResponse])
+def get_users():
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT * FROM items;")
-    items = cur.fetchall()
+    cur.execute("SELECT id, name, login FROM users;")
+    users = cur.fetchall()
     cur.close()
     conn.close()
-    return items
+    return users
 
-# Эндпоинт для получения одной записи по ID
-@app.get("/items/{item_id}", response_model=ItemResponse)
-def get_item(item_id: int):
+# Эндпоинт для получения одного пользователя по ID
+@app.get("/users/{user_id}", response_model=UserResponse)
+def get_user(user_id: int):
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT * FROM items WHERE id = %s;", (item_id,))
-    item = cur.fetchone()
+    cur.execute("SELECT id, name, login FROM users WHERE id = %s;", (user_id,))
+    user = cur.fetchone()
     cur.close()
     conn.close()
-    if item is None:
-        raise HTTPException(status_code=404, detail="Item not found")
-    return item
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
 
-# Эндпоинт для обновления записи
-@app.put("/items/{item_id}", response_model=ItemResponse)
-def update_item(item_id: int, item: ItemCreate):
+# Эндпоинт для обновления пользователя
+@app.put("/users/{user_id}", response_model=UserResponse)
+def update_user(user_id: int, user: UserCreate):
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
-        "UPDATE items SET name = %s, description = %s WHERE id = %s RETURNING id;",
-        (item.name, item.description, item_id)
+        "UPDATE users SET name = %s, login = %s, password = %s WHERE id = %s RETURNING id, name, login;",
+        (user.name, user.login, user.password, user_id)
     )
-    updated_item = cur.fetchone()
+    updated_user = cur.fetchone()
     conn.commit()
     cur.close()
     conn.close()
-    if updated_item is None:
-        raise HTTPException(status_code=404, detail="Item not found")
-    return {**updated_item, **item.dict()}
+    if updated_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return updated_user
 
-# Эндпоинт для удаления записи
-@app.delete("/items/{item_id}")
-def delete_item(item_id: int):
+# Эндпоинт для удаления пользователя
+@app.delete("/users/{user_id}")
+def delete_user(user_id: int):
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("DELETE FROM items WHERE id = %s RETURNING id;", (item_id,))
-    deleted_item = cur.fetchone()
+    cur.execute("DELETE FROM users WHERE id = %s RETURNING id;", (user_id,))
+    deleted_user = cur.fetchone()
     conn.commit()
     cur.close()
     conn.close()
-    if deleted_item is None:
-        raise HTTPException(status_code=404, detail="Item not found")
-    return {"message": "Item deleted", "id": deleted_item["id"]}
+    if deleted_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"message": "User deleted", "id": deleted_user["id"]}
 
 if __name__ == "__main__":
     import uvicorn
