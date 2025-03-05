@@ -4,25 +4,26 @@ from fastapi.staticfiles import StaticFiles  # Импортируем StaticFile
 from pydantic import BaseModel
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from fastapi.middleware.cors import CORSMiddleware
 
 # Настройки подключения к PostgreSQL
-DATABASE_CONFIG = {
-    "dbname": "postgres",
-    "user": "postgres",
-    "password": "12345",
-    "host": "db",  # Имя контейнера PostgreSQL
-    "port": "5432",
-    "client_encoding": "utf8",
-}
-
 # DATABASE_CONFIG = {
-#     "dbname": "users",
-#     "user": "set",
-#     "password": "dwordpass",
-#     "host": "172.30.192.44:5173",  # Имя контейнера PostgreSQL
+#     "dbname": "postgres",
+#     "user": "postgres",
+#     "password": "12345",
+#     "host": "db",  # Имя контейнера PostgreSQL
 #     "port": "5432",
 #     "client_encoding": "utf8",
 # }
+
+DATABASE_CONFIG = {
+    "dbname": "User",
+    "user": "set",
+    "password": "dwordpass",
+    "host": "172.30.192.44",  # Имя контейнера PostgreSQL
+    "port": "5432",
+    "client_encoding": "utf8",
+}
 
 # Модель для создания пользователя
 class UserCreate(BaseModel):
@@ -48,6 +49,13 @@ class ProjectResponse(BaseModel):
 # Инициализация FastAPI
 app = FastAPI()
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], 
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 # Подключение статической директории
 #app.mount("/static", StaticFiles(directory="public"), name="static")
 
@@ -65,7 +73,7 @@ def create_tables():
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS users (
+        CREATE TABLE IF NOT EXISTS User (
             id SERIAL PRIMARY KEY,
             name VARCHAR(100) NOT NULL,
             login VARCHAR(100) UNIQUE NOT NULL,
@@ -73,7 +81,7 @@ def create_tables():
         );
     """)
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS projects (
+        CREATE TABLE IF NOT EXISTS Project (
             id SERIAL PRIMARY KEY,
             name VARCHAR(100) NOT NULL,
             voices INT DEFAULT 0
