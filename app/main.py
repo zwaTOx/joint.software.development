@@ -5,6 +5,7 @@ from pydantic import BaseModel
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from fastapi.middleware.cors import CORSMiddleware
+import datetime
 
 # Настройки подключения к PostgreSQL
 # DATABASE_CONFIG = {
@@ -46,6 +47,24 @@ class ProjectResponse(BaseModel):
     id: int
     name: str
     voices: int
+
+class SuggestionCreate(BaseModel):
+    text: str
+    user_id: int
+    state: str
+    datetime: str  # Формат даты и времени можно адаптировать под требования
+    score: int = 0
+    title: str
+
+class SuggestionResponse(BaseModel):
+    id: int
+    text: str
+    user_id: int
+    state: str
+    datetime: str
+    score: int
+    title: str
+
 # Инициализация FastAPI
 app = FastAPI()
 
@@ -243,7 +262,82 @@ def delete_project(project_id: int):
         raise HTTPException(status_code=404, detail="Project not found")
     return {"message": "Project deleted", "id": deleted_project["id"]}
 
+from datetime import datetime
+
+@app.post("/suggestions/", response_model=SuggestionResponse, tags=["suggestions"])
+def create_suggestion(suggestion: SuggestionCreate):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO "Suggestions" (text, user_id, state, datetime, score, title)
+        VALUES (%s, %s, %s, NOW(), %s, %s)
+        RETURNING id, text, user_id, state, datetime, score, title;
+        """,
+        (suggestion.text, suggestion.user_id, "New", suggestion.score, suggestion.title)
+    )
+    new_suggestion = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    # Преобразование datetime в строку
+    new_suggestion_dict = dict(new_suggestion)
+    new_suggestion_dict['datetime'] = new_suggestion_dict['datetime'].strftime('%Y-%m-%d %H:%M:%S')
+
+    return new_suggestion_dict
+
+
+
+# Эндпоинт для получения одного предложения по ID
+@app.get("/suggestions/{suggestion_id}", response_model=SuggestionResponse, tags=["suggestions"])
+def get_suggestion(suggestion_id: int):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('SELECT id, text, user_id, state, datetime, score, title FROM "Suggestions" WHERE id = %s;', (suggestion_id,))
+    suggestion = cur.fetchone()
+    cur.close()
+    conn.close()
+    if suggestion is None:
+        raise HTTPException(status_code=404, detail="Suggestion not found")
+    return suggestion
+
+# Эндпоинт для обновления предложения
+@app.put("/suggestions/{suggestion_id}", response_model=SuggestionResponse, tags=["suggestions"])
+def update_suggestion(suggestion_id: int, suggestion: SuggestionCreate):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE "Suggestions" SET text = %s, user_id = %s, state = %s, datetime = %s, score = %s, title = %s
+        WHERE id = %s
+        RETURNING id, text, user_id, state, datetime, score, title;
+        """,
+        (suggestion.text, suggestion.user_id, suggestion.state, suggestion.datetime, suggestion.score, suggestion.title, suggestion_id)
+    )
+    updated_suggestion = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
+    if updated_suggestion is None:
+        raise HTTPException(status_code=404, detail="Suggestion not found")
+    return updated_suggestion
+
+# Эндпоинт для удаления предложения
+@app.delete("/suggestions/{suggestion_id}", tags=["suggestions"])
+def delete_suggestion(suggestion_id: int):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('DELETE FROM "Suggestions" WHERE id = %s RETURNING id;', (suggestion_id,))
+    deleted_suggestion = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
+    if deleted_suggestion is None:
+        raise HTTPException(status_code=404, detail="Suggestion not found")
+    return {"message": "Suggestion deleted", "id": deleted_suggestion["id"]}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
