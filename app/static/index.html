@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Предложения</title>
+    <link rel="stylesheet" href="styles.css">
+    <script defer src="script.js"></script>
+</head>
+<body>
+    <header class="header">
+        <div class="logo">
+            <img src="public/images/logo.png" alt="нажми на меня">
+        </div>
+        <nav>
+            <ul>
+                <li><a href="#new" onclick="showSection('new')">Новые</a></li>
+                <li><a href="#in-progress" onclick="showSection('in-progress')">В работе</a></li>
+                <li><a href="#accepted" onclick="showSection('accepted')">Принятые</a></li>
+                <li><a href="#rejected" onclick="showSection('rejected')">Отклонённые</a></li>
+                <button class="createProposal" onclick="openModal()">Создать предложение</button>
+                <a href="#">
+                    <img class="imgUser" src="public/images/icon.png" alt="">
+                </a>
+            </ul>
+        </nav>
+    </header>
+    
+    <main class="main">
+        <section id="new" class="proposal-section">Новые предложения</section>
+        <section id="in-progress" class="proposal-section" style="display: none;">В работе</section>
+        <section id="accepted" class="proposal-section" style="display: none;">Принятые</section>
+        <section id="rejected" class="proposal-section" style="display: none;">Отклонённые</section>
+    </main>
+    
+    <div id="modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2>Создать новое предложение</h2>
+            <input type="text" id="title" placeholder="Заголовок">
+            <textarea id="description" placeholder="Описание"></textarea>
+            <button onclick="addProposal()">Добавить</button>
+            <button onclick="closeModal()">Отмена</button>
+        </div>
+    </div>
+</body>
+</html>

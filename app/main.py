@@ -15,6 +15,15 @@ DATABASE_CONFIG = {
     "client_encoding": "utf8",
 }
 
+# DATABASE_CONFIG = {
+#     "dbname": "users",
+#     "user": "set",
+#     "password": "dwordpass",
+#     "host": "172.30.192.44:5173",  # Имя контейнера PostgreSQL
+#     "port": "5432",
+#     "client_encoding": "utf8",
+# }
+
 # Модель для создания пользователя
 class UserCreate(BaseModel):
     name: str
@@ -40,7 +49,7 @@ class ProjectResponse(BaseModel):
 app = FastAPI()
 
 # Подключение статической директории
-app.mount("/static", StaticFiles(directory="public"), name="static")
+#app.mount("/static", StaticFiles(directory="public"), name="static")
 
 # Подключение к базе данных
 def get_db_connection():
@@ -81,7 +90,7 @@ def startup():
 
 @app.get("/")
 def read_root():
-    return FileResponse("public/index.html")
+    return FileResponse("static/index.html")
 
 # Эндпоинт для создания пользователя
 @app.post("/users/", response_model=UserResponse)
@@ -219,8 +228,6 @@ def delete_project(project_id: int):
     if deleted_project is None:
         raise HTTPException(status_code=404, detail="Project not found")
     return {"message": "Project deleted", "id": deleted_project["id"]}
-
-
 
 if __name__ == "__main__":
     import uvicorn
