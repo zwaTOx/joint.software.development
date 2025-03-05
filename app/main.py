@@ -1,4 +1,6 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles  # Импортируем StaticFiles
 from pydantic import BaseModel
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -25,8 +27,20 @@ class UserResponse(BaseModel):
     name: str
     login: str
 
+# Модель для создания проекта
+class ProjectCreate(BaseModel):
+    name: str
+
+# Модель для ответа (с голосами)
+class ProjectResponse(BaseModel):
+    id: int
+    name: str
+    voices: int
 # Инициализация FastAPI
 app = FastAPI()
+
+# Подключение статической директории
+app.mount("/static", StaticFiles(directory="public"), name="static")
 
 # Подключение к базе данных
 def get_db_connection():
@@ -49,6 +63,13 @@ def create_tables():
             password VARCHAR(100) NOT NULL
         );
     """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS projects (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(100) NOT NULL,
+            voices INT DEFAULT 0
+        );
+    """)
     conn.commit()
     cur.close()
     conn.close()
@@ -60,7 +81,7 @@ def startup():
 
 @app.get("/")
 def read_root():
-    return {"message": "Hello, World!"}
+    return FileResponse("public/index.html")
 
 # Эндпоинт для создания пользователя
 @app.post("/users/", response_model=UserResponse)
@@ -131,6 +152,75 @@ def delete_user(user_id: int):
     if deleted_user is None:
         raise HTTPException(status_code=404, detail="User not found")
     return {"message": "User deleted", "id": deleted_user["id"]}
+
+
+
+@app.post("/projects/", response_model=ProjectResponse)
+def create_project(project: ProjectCreate):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO projects (name) VALUES (%s) RETURNING id, name, voices;",
+        (project.name,)
+    )
+    new_project = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
+    return new_project
+
+@app.get("/projects/", response_model=list[ProjectResponse])
+def get_projects():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id, name, voices FROM projects;")
+    projects = cur.fetchall()
+    cur.close()
+    conn.close()
+    return projects
+
+@app.get("/projects/{project_id}", response_model=ProjectResponse)
+def get_project(project_id: int):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id, name, voices FROM projects WHERE id = %s;", (project_id,))
+    project = cur.fetchone()
+    cur.close()
+    conn.close()
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+@app.put("/projects/{project_id}", response_model=ProjectResponse)
+def update_project(project_id: int, project: ProjectCreate):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE projects SET name = %s WHERE id = %s RETURNING id, name, voices;",
+        (project.name, project_id)
+    )
+    updated_project = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
+    if updated_project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return updated_project
+
+@app.delete("/projects/{project_id}")
+def delete_project(project_id: int):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM projects WHERE id = %s RETURNING id;", (project_id,))
+    deleted_project = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
+    if deleted_project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {"message": "Project deleted", "id": deleted_project["id"]}
+
+
 
 if __name__ == "__main__":
     import uvicorn
