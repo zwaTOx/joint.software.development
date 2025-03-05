@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # }
 
 DATABASE_CONFIG = {
-    "dbname": "User",
+    "dbname": "users",
     "user": "set",
     "password": "dwordpass",
     "host": "172.30.192.44",  # Имя контейнера PostgreSQL
@@ -73,7 +73,7 @@ def create_tables():
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS User (
+        CREATE TABLE IF NOT EXISTS "User" (
             id SERIAL PRIMARY KEY,
             name VARCHAR(100) NOT NULL,
             login VARCHAR(100) UNIQUE NOT NULL,
@@ -81,7 +81,7 @@ def create_tables():
         );
     """)
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS Project (
+        CREATE TABLE IF NOT EXISTS "Project" (
             id SERIAL PRIMARY KEY,
             name VARCHAR(100) NOT NULL,
             voices INT DEFAULT 0
@@ -90,6 +90,7 @@ def create_tables():
     conn.commit()
     cur.close()
     conn.close()
+
 
 # Инициализация таблиц при старте приложения
 @app.on_event("startup")
@@ -106,7 +107,7 @@ def create_user(user: UserCreate):
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
-        "INSERT INTO users (name, login, password) VALUES (%s, %s, %s) RETURNING id, name, login;",
+        "INSERT INTO \"User\" (name, login, password) VALUES (%s, %s, %s) RETURNING id, name, login;",
         (user.name, user.login, user.password)
     )
     new_user = cur.fetchone()
@@ -120,7 +121,7 @@ def create_user(user: UserCreate):
 def get_users():
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT id, name, login FROM users;")
+    cur.execute("SELECT id, name, login FROM \"User\";")
     users = cur.fetchall()
     cur.close()
     conn.close()
@@ -131,7 +132,7 @@ def get_users():
 def get_user(user_id: int):
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT id, name, login FROM users WHERE id = %s;", (user_id,))
+    cur.execute("SELECT id, name, login FROM \"User\" WHERE id = %s;", (user_id,))
     user = cur.fetchone()
     cur.close()
     conn.close()
@@ -145,7 +146,7 @@ def update_user(user_id: int, user: UserCreate):
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
-        "UPDATE users SET name = %s, login = %s, password = %s WHERE id = %s RETURNING id, name, login;",
+        "UPDATE \"User\" SET name = %s, login = %s, password = %s WHERE id = %s RETURNING id, name, login;",
         (user.name, user.login, user.password, user_id)
     )
     updated_user = cur.fetchone()
@@ -161,7 +162,7 @@ def update_user(user_id: int, user: UserCreate):
 def delete_user(user_id: int):
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("DELETE FROM users WHERE id = %s RETURNING id;", (user_id,))
+    cur.execute("DELETE FROM \"User\" WHERE id = %s RETURNING id;", (user_id,))
     deleted_user = cur.fetchone()
     conn.commit()
     cur.close()
@@ -172,12 +173,13 @@ def delete_user(user_id: int):
 
 
 
+# Эндпоинт для создания проекта
 @app.post("/projects/", response_model=ProjectResponse, tags=["project"])
 def create_project(project: ProjectCreate):
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
-        "INSERT INTO projects (name) VALUES (%s) RETURNING id, name, voices;",
+        "INSERT INTO \"Project\" (name) VALUES (%s) RETURNING id, name, voices;",
         (project.name,)
     )
     new_project = cur.fetchone()
@@ -186,27 +188,30 @@ def create_project(project: ProjectCreate):
     conn.close()
     return new_project
 
+# Эндпоинт для получения всех проектов
 @app.get("/projects/", response_model=list[ProjectResponse], tags=["project"])
 def get_projects():
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT id, name, voices FROM projects;")
+    cur.execute('SELECT id, name, voices FROM "Project";')
     projects = cur.fetchall()
     cur.close()
     conn.close()
     return projects
 
+# Эндпоинт для получения одного проекта по ID
 @app.get("/projects/{project_id}", response_model=ProjectResponse, tags=["project"])
 def get_project(project_id: int):
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT id, name, voices FROM projects WHERE id = %s;", (project_id,))
+    cur.execute('SELECT id, name, voices FROM "Project" WHERE id = %s;', (project_id,))
     project = cur.fetchone()
     cur.close()
     conn.close()
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
+
 
 @app.put("/projects/{project_id}", response_model=ProjectResponse, tags=["project"])
 def update_project(project_id: int, project: ProjectCreate):
@@ -224,11 +229,29 @@ def update_project(project_id: int, project: ProjectCreate):
         raise HTTPException(status_code=404, detail="Project not found")
     return updated_project
 
+# Эндпоинт для обновления проекта
+@app.put("/projects/{project_id}", response_model=ProjectResponse, tags=["project"])
+def update_project(project_id: int, project: ProjectCreate):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE \"Project\" SET name = %s WHERE id = %s RETURNING id, name, voices;",
+        (project.name, project_id)
+    )
+    updated_project = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
+    if updated_project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return updated_project
+
+# Эндпоинт для удаления проекта
 @app.delete("/projects/{project_id}", tags=["project"])
 def delete_project(project_id: int):
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("DELETE FROM projects WHERE id = %s RETURNING id;", (project_id,))
+    cur.execute("DELETE FROM \"Project\" WHERE id = %s RETURNING id;", (project_id,))
     deleted_project = cur.fetchone()
     conn.commit()
     cur.close()
@@ -236,7 +259,6 @@ def delete_project(project_id: int):
     if deleted_project is None:
         raise HTTPException(status_code=404, detail="Project not found")
     return {"message": "Project deleted", "id": deleted_project["id"]}
-
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
