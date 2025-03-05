@@ -93,7 +93,7 @@ def read_root():
     return FileResponse("static/index.html")
 
 # Эндпоинт для создания пользователя
-@app.post("/users/", response_model=UserResponse)
+@app.post("/users/", response_model=UserResponse, tags=["users"])
 def create_user(user: UserCreate):
     conn = get_db_connection()
     cur = conn.cursor()
@@ -108,7 +108,7 @@ def create_user(user: UserCreate):
     return new_user
 
 # Эндпоинт для получения всех пользователей
-@app.get("/users/", response_model=list[UserResponse])
+@app.get("/users/", response_model=list[UserResponse], tags=["users"])
 def get_users():
     conn = get_db_connection()
     cur = conn.cursor()
@@ -119,7 +119,7 @@ def get_users():
     return users
 
 # Эндпоинт для получения одного пользователя по ID
-@app.get("/users/{user_id}", response_model=UserResponse)
+@app.get("/users/{user_id}", response_model=UserResponse, tags=["users"])
 def get_user(user_id: int):
     conn = get_db_connection()
     cur = conn.cursor()
@@ -132,7 +132,7 @@ def get_user(user_id: int):
     return user
 
 # Эндпоинт для обновления пользователя
-@app.put("/users/{user_id}", response_model=UserResponse)
+@app.put("/users/{user_id}", response_model=UserResponse, tags=["users"])
 def update_user(user_id: int, user: UserCreate):
     conn = get_db_connection()
     cur = conn.cursor()
@@ -149,7 +149,7 @@ def update_user(user_id: int, user: UserCreate):
     return updated_user
 
 # Эндпоинт для удаления пользователя
-@app.delete("/users/{user_id}")
+@app.delete("/users/{user_id}", tags=["users"])
 def delete_user(user_id: int):
     conn = get_db_connection()
     cur = conn.cursor()
@@ -164,7 +164,7 @@ def delete_user(user_id: int):
 
 
 
-@app.post("/projects/", response_model=ProjectResponse)
+@app.post("/projects/", response_model=ProjectResponse, tags=["project"])
 def create_project(project: ProjectCreate):
     conn = get_db_connection()
     cur = conn.cursor()
@@ -178,7 +178,7 @@ def create_project(project: ProjectCreate):
     conn.close()
     return new_project
 
-@app.get("/projects/", response_model=list[ProjectResponse])
+@app.get("/projects/", response_model=list[ProjectResponse], tags=["project"])
 def get_projects():
     conn = get_db_connection()
     cur = conn.cursor()
@@ -188,7 +188,7 @@ def get_projects():
     conn.close()
     return projects
 
-@app.get("/projects/{project_id}", response_model=ProjectResponse)
+@app.get("/projects/{project_id}", response_model=ProjectResponse, tags=["project"])
 def get_project(project_id: int):
     conn = get_db_connection()
     cur = conn.cursor()
@@ -200,7 +200,7 @@ def get_project(project_id: int):
         raise HTTPException(status_code=404, detail="Project not found")
     return project
 
-@app.put("/projects/{project_id}", response_model=ProjectResponse)
+@app.put("/projects/{project_id}", response_model=ProjectResponse, tags=["project"])
 def update_project(project_id: int, project: ProjectCreate):
     conn = get_db_connection()
     cur = conn.cursor()
@@ -216,7 +216,7 @@ def update_project(project_id: int, project: ProjectCreate):
         raise HTTPException(status_code=404, detail="Project not found")
     return updated_project
 
-@app.delete("/projects/{project_id}")
+@app.delete("/projects/{project_id}", tags=["project"])
 def delete_project(project_id: int):
     conn = get_db_connection()
     cur = conn.cursor()
