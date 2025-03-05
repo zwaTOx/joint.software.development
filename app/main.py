@@ -229,23 +229,6 @@ def update_project(project_id: int, project: ProjectCreate):
         raise HTTPException(status_code=404, detail="Project not found")
     return updated_project
 
-# Эндпоинт для обновления проекта
-@app.put("/projects/{project_id}", response_model=ProjectResponse, tags=["project"])
-def update_project(project_id: int, project: ProjectCreate):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        "UPDATE \"Project\" SET name = %s WHERE id = %s RETURNING id, name, voices;",
-        (project.name, project_id)
-    )
-    updated_project = cur.fetchone()
-    conn.commit()
-    cur.close()
-    conn.close()
-    if updated_project is None:
-        raise HTTPException(status_code=404, detail="Project not found")
-    return updated_project
-
 # Эндпоинт для удаления проекта
 @app.delete("/projects/{project_id}", tags=["project"])
 def delete_project(project_id: int):
@@ -259,6 +242,8 @@ def delete_project(project_id: int):
     if deleted_project is None:
         raise HTTPException(status_code=404, detail="Project not found")
     return {"message": "Project deleted", "id": deleted_project["id"]}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
