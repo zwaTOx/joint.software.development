@@ -58,7 +58,7 @@ class SuggestionCreate(BaseModel):
     title: str
     score: Optional[int] = 0
     state: Optional[str] = "New"
-    datetime: Optional[str]  # Ожидаем строку
+    datetime: Optional[str] = ""# Ожидаем строку
 
 
 
@@ -408,6 +408,8 @@ def get_suggestion(suggestion_id: int):
     suggestion['datetime'] = suggestion['datetime'].strftime('%Y-%m-%d %H:%M:%S')
 
     return suggestion
+    
+    
 @app.post("/vote/{suggestion_id}", response_model=SuggestionResponse, tags=["suggestions"])
 def vote(suggestion_id: int):
     conn = get_db_connection()
