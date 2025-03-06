@@ -57,6 +57,9 @@ class SuggestionCreate(BaseModel):
     user_id: int
     title: str
     score: Optional[int] = 0
+    state: Optional[str] = "New"
+    datetime: Optional[str]  # Ожидаем строку
+
 
 
 class SuggestionResponse(BaseModel):
@@ -405,15 +408,36 @@ def get_suggestion(suggestion_id: int):
     suggestion['datetime'] = suggestion['datetime'].strftime('%Y-%m-%d %H:%M:%S')
 
     return suggestion
+@app.post("/vote/{suggestion_id}", response_model=SuggestionResponse, tags=["suggestions"])
+def vote(suggestion_id: int):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE "Suggestions" 
+        SET score = score + 1
+        WHERE id = %s
+        RETURNING id, text, user_id, state, datetime, score, title;
+        """,
+        (suggestion_id,)
+    )
+    updated_suggestion = cur.fetchone()
+    conn.commit()
 
-# Эндпоинт для обновления предложения
+    if updated_suggestion is None:
+        raise HTTPException(status_code=404, detail="Suggestion not found")
+    
+    return updated_suggestion
+    
+    
 @app.put("/suggestions/{suggestion_id}", response_model=SuggestionResponse, tags=["suggestions"])
 def update_suggestion(suggestion_id: int, suggestion: SuggestionCreate):
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
         """
-        UPDATE "Suggestions" SET text = %s, user_id = %s, state = %s, datetime = %s, score = %s, title = %s
+        UPDATE "Suggestions" 
+        SET text = %s, user_id = %s, state = %s, TO_CHAR(datetime, 'YYYY-MM-DD HH24:MI:SS') AS datetime, score = %s, title = %s
         WHERE id = %s
         RETURNING id, text, user_id, state, datetime, score, title;
         """,
@@ -421,11 +445,12 @@ def update_suggestion(suggestion_id: int, suggestion: SuggestionCreate):
     )
     updated_suggestion = cur.fetchone()
     conn.commit()
-    cur.close()
-    conn.close()
+
     if updated_suggestion is None:
         raise HTTPException(status_code=404, detail="Suggestion not found")
+    
     return updated_suggestion
+
 
 # Эндпоинт для удаления предложения
 @app.delete("/suggestions/{suggestion_id}", tags=["suggestions"])
