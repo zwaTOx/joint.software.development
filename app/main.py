@@ -9,6 +9,8 @@ import datetime
 from passlib.context import CryptContext
 
 
+from pydantic import BaseModel
+from typing import Optional
 # Настройки подключения к PostgreSQL
 # DATABASE_CONFIG = {
 #     "dbname": "postgres",
@@ -54,10 +56,8 @@ class SuggestionCreate(BaseModel):
     text: str
     user_id: int
     title: str
-    
+    score: Optional[int] = 0
 
-from pydantic import BaseModel
-from typing import Optional
 
 class SuggestionResponse(BaseModel):
     id: int
@@ -310,47 +310,28 @@ from datetime import datetime
 def create_suggestion(suggestion: SuggestionCreate):
     conn = get_db_connection()
     cur = conn.cursor()
+    # Проверяем, существует ли user_id в таблице User
+    cur.execute("SELECT id FROM \"User\" WHERE id = %s;", (suggestion.user_id,))
+    user = cur.fetchone()
 
-    try:
-        # Проверяем, существует ли user_id в таблице User
-        cur.execute("SELECT id FROM \"User\" WHERE id = %s;", (suggestion.user_id,))
-        user = cur.fetchone()
+    # Если user_id не найден, возвращаем ошибку 404
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
 
-        # Если user_id не найден, возвращаем ошибку 404
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
+    # Вставляем новое предложение
+    cur.execute(
+        """
+        INSERT INTO "Suggestions" (text, user_id, state, datetime, score, title)
+        VALUES (%s, %s, 'New', NOW(), %s, %s)
+        RETURNING id, text, user_id, state, TO_CHAR(datetime, 'YYYY-MM-DD HH24:MI:SS') AS datetime, score, title;
 
-        # Вставляем новое предложение
-        cur.execute(
-            """
-            INSERT INTO "Suggestions" (text, user_id, state, datetime, score, title)
-            VALUES (%s, %s, 'New', NOW(), 0, %s)  -- Заменяем на 0 или другое значение по умолчанию, если score отсутствует
-            RETURNING id, text, user_id, state, datetime, score, title;
-            """,
-            (suggestion.text, suggestion.title)
-        )
-        new_suggestion = cur.fetchone()
-        conn.commit()
+        """,
+        (suggestion.text, suggestion.user_id, suggestion.score, suggestion.title)
+    )
+    new_suggestion = cur.fetchone()
+    conn.commit()
 
-        return new_suggestion
-
-    except HTTPException as e:
-        # Пробрасываем HTTPException для обработки FastAPI
-        raise e
-    except Exception as e:
-        # Логируем ошибку для разработки
-        print(f"Error occurred: {str(e)}")  # Можно заменить на логирование
-        raise HTTPException(status_code=500, detail="Internal Server Error")
-    finally:
-        # Закрываем соединение с базой данных
-        try:
-            cur.close()
-        except Exception as close_e:
-            print(f"Error closing cursor: {str(close_e)}")
-        try:
-            conn.close()
-        except Exception as close_e:
-            print(f"Error closing connection: {str(close_e)}")
+    return new_suggestion
 
 
 from datetime import datetime
