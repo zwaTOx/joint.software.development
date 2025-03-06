@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import datetime
 from passlib.context import CryptContext
 
-
+from typing import List
 from pydantic import BaseModel
 from typing import Optional
 # Настройки подключения к PostgreSQL
@@ -68,6 +68,17 @@ class SuggestionResponse(BaseModel):
     score: int
     title: Optional[str]
 
+class CommentCreate(BaseModel):
+    suggestion_id: int
+    user_id: Optional[int] = None
+    text: str
+
+class CommentResponse(BaseModel):
+    id: int
+    suggestion_id: int
+    user_id: Optional[int]
+    text: str
+    created_at: Optional[str]  # Будет строкой после форматирования
 
 # Инициализация FastAPI
 app = FastAPI()
@@ -110,6 +121,16 @@ def create_tables():
             voices INT DEFAULT 0
         );
     """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS "Comments" (
+            id SERIAL PRIMARY KEY,
+            suggestion_id INT REFERENCES "Suggestions"(id) ON DELETE CASCADE,
+            user_id INT REFERENCES "User"(id) ON DELETE SET NULL,
+            text TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT NOW()
+        );
+    """)
+
     conn.commit()
     cur.close()
     conn.close()
@@ -336,36 +357,35 @@ def create_suggestion(suggestion: SuggestionCreate):
 
 from datetime import datetime
 
-@app.get("/suggestions/", response_model=list[SuggestionResponse], tags=["suggestions"])
-def get_suggestions(sort_by_score: bool = True):
+@app.get("/suggestions/", response_model=List[SuggestionResponse], tags=["suggestions"])
+def get_suggestions(skip: int = 0, limit: int = 100):
     conn = get_db_connection()
     cur = conn.cursor()
 
-    order = "DESC" if sort_by_score else "ASC"
+    try:
+        cur.execute(
+            """
+            SELECT id, text, user_id, state, 
+                   TO_CHAR(datetime, 'YYYY-MM-DD HH24:MI:SS') AS datetime, 
+                   score, title 
+            FROM "Suggestions" 
+            ORDER BY datetime DESC 
+            LIMIT %s OFFSET %s;
+            """,
+            (limit, skip)
+        )
 
-    cur.execute(
-        f"""
-        SELECT id, text, user_id, state, datetime, score, title
-        FROM "Suggestions"
-        ORDER BY score {order};
-        """
-    )
-    suggestions = cur.fetchall()
-    cur.close()
-    conn.close()
+        suggestions = cur.fetchall()
 
-    return [
-        {
-            "id": row[0],
-            "text": row[1],
-            "user_id": row[2],
-            "state": row[3],
-            "datetime": row[4].isoformat() if row[4] else None,  # Преобразуем datetime в строку
-            "score": row[5],
-            "title": row[6] or "",  # Заменяем None на пустую строку
-        }
-        for row in suggestions
-    ]
+        return suggestions
+
+    except Exception as e:
+        print(f"Error occurred: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+    finally:
+        cur.close()
+        conn.close()
 
 
 
@@ -420,6 +440,101 @@ def delete_suggestion(suggestion_id: int):
     if deleted_suggestion is None:
         raise HTTPException(status_code=404, detail="Suggestion not found")
     return {"message": "Suggestion deleted", "id": deleted_suggestion["id"]}
+
+# Создание комментария
+@app.post("/comments/", response_model=CommentResponse, tags=["comments"])
+def create_comment(comment: CommentCreate):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Проверяем, существует ли предложение
+    cur.execute('SELECT id FROM "Suggestions" WHERE id = %s;', (comment.suggestion_id,))
+    if not cur.fetchone():
+        raise HTTPException(status_code=404, detail="Suggestion not found")
+
+    cur.execute(
+        """
+        INSERT INTO "Comments" (suggestion_id, user_id, text) 
+        VALUES (%s, %s, %s) 
+        RETURNING id, suggestion_id, user_id, text, TO_CHAR(created_at, 'YYYY-MM-DD HH24:MI:SS') AS created_at;
+        """,
+        (comment.suggestion_id, comment.user_id, comment.text)
+    )
+
+    new_comment = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return new_comment
+
+
+# Получение всех комментариев к определенному предложению
+@app.get("/suggestions/{suggestion_id}/comments/", response_model=List[CommentResponse], tags=["comments"])
+def get_comments_for_suggestion(suggestion_id: int):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT id, suggestion_id, user_id, text, TO_CHAR(created_at, 'YYYY-MM-DD HH24:MI:SS') AS created_at 
+        FROM "Comments" WHERE suggestion_id = %s ORDER BY created_at DESC;
+        """,
+        (suggestion_id,)
+    )
+
+    comments = cur.fetchall()
+    cur.close()
+    conn.close()
+    return comments
+
+@app.get("/suggestions/{suggestion_id}/full", tags=["suggestions"])
+def get_suggestion_with_comments(suggestion_id: int):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Получаем предложение
+    cur.execute(
+        'SELECT id, text, user_id, state, TO_CHAR(datetime, \'YYYY-MM-DD HH24:MI:SS\') AS datetime, score, title '
+        'FROM "Suggestions" WHERE id = %s;', (suggestion_id,)
+    )
+    suggestion = cur.fetchone()
+
+    if suggestion is None:
+        cur.close()
+        conn.close()
+        raise HTTPException(status_code=404, detail="Suggestion not found")
+
+    # Получаем комментарии
+    cur.execute(
+        'SELECT id, suggestion_id, user_id, text, TO_CHAR(created_at, \'YYYY-MM-DD HH24:MI:SS\') AS created_at '
+        'FROM "Comments" WHERE suggestion_id = %s ORDER BY created_at DESC;', (suggestion_id,)
+    )
+    comments = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return {"suggestion": suggestion, "comments": comments}
+
+# Удаление комментария
+@app.delete("/comments/{comment_id}", tags=["comments"])
+def delete_comment(comment_id: int):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    cur.execute('DELETE FROM "Comments" WHERE id = %s RETURNING id;', (comment_id,))
+    deleted_comment = cur.fetchone()
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    if deleted_comment is None:
+        raise HTTPException(status_code=404, detail="Comment not found")
+
+    return {"message": "Comment deleted", "id": deleted_comment["id"]}
+
 
 
 if __name__ == "__main__":
