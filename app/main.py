@@ -428,9 +428,36 @@ def vote(suggestion_id: int):
 
     if updated_suggestion is None:
         raise HTTPException(status_code=404, detail="Suggestion not found")
-    
+
+    # Преобразуем datetime в строку перед возвращением
+    updated_suggestion['datetime'] = updated_suggestion['datetime'].strftime('%Y-%m-%d %H:%M:%S')
+
     return updated_suggestion
-    
+
+
+@app.post("/unvote/{suggestion_id}", response_model=SuggestionResponse, tags=["suggestions"])
+def unvote(suggestion_id: int):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Пытаемся уменьшить количество голосов (проверка на возможность уменьшения)
+    cur.execute(
+        """
+        UPDATE "Suggestions" 
+        SET score = score - 1
+        WHERE id = %s AND score > 0  -- Не даем уменьшать, если голосов уже нет
+        RETURNING id, text, user_id, state, datetime, score, title;
+        """,
+        (suggestion_id,)
+    )
+    updated_suggestion = cur.fetchone()
+    conn.commit()
+
+    # Если предложение не найдено, или не удалось уменьшить количество голосов
+    if updated_suggestion is None:
+        raise HTTPException(status_code=404, detail="Suggestion not found or no votes to remove")
+
+    return updated_suggestion
     
 @app.put("/suggestions/{suggestion_id}", response_model=SuggestionResponse, tags=["suggestions"])
 def update_suggestion(suggestion_id: int, suggestion: SuggestionCreate):
@@ -443,7 +470,7 @@ def update_suggestion(suggestion_id: int, suggestion: SuggestionCreate):
         WHERE id = %s
         RETURNING id, text, user_id, state, datetime, score, title;
         """,
-        (suggestion.text, suggestion.user_id, suggestion.state, suggestion.datetime, suggestion.score, suggestion.title, suggestion_id)
+        (suggestion.text, suggestion.user_id, suggestion.state, suggestion.score, suggestion.title, suggestion_id)
     )
     updated_suggestion = cur.fetchone()
     conn.commit()
