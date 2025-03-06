@@ -6,6 +6,8 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from fastapi.middleware.cors import CORSMiddleware
 import datetime
+from passlib.context import CryptContext
+
 
 # Настройки подключения к PostgreSQL
 # DATABASE_CONFIG = {
@@ -51,19 +53,21 @@ class ProjectResponse(BaseModel):
 class SuggestionCreate(BaseModel):
     text: str
     user_id: int
-    state: str
-    datetime: str  # Формат даты и времени можно адаптировать под требования
-    score: int = 0
     title: str
+    
+
+from pydantic import BaseModel
+from typing import Optional
 
 class SuggestionResponse(BaseModel):
     id: int
     text: str
     user_id: int
     state: str
-    datetime: str
+    datetime: Optional[str]  # Ожидаем строку
     score: int
-    title: str
+    title: Optional[str]
+
 
 # Инициализация FastAPI
 app = FastAPI()
@@ -120,14 +124,30 @@ def startup():
 def read_root():
     return FileResponse("static/index.html")
 
-# Эндпоинт для создания пользователя
+# Создаем контекст для хэширования паролей
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# Функция для хеширования пароля
+def hash_password(password: str) -> str:
+    return pwd_context.hash(password)
+
+# Эндпоинт для создания пользователя (с хешированием пароля)
 @app.post("/users/", response_model=UserResponse, tags=["users"])
 def create_user(user: UserCreate):
     conn = get_db_connection()
     cur = conn.cursor()
+    
+    # Проверяем, существует ли уже пользователь
+    cur.execute('SELECT id FROM "User" WHERE login = %s;', (user.login,))
+    if cur.fetchone():
+        raise HTTPException(status_code=400, detail="Пользователь с таким логином уже существует")
+
+    # Хэшируем пароль перед сохранением
+    hashed_password = hash_password(user.password)
+
     cur.execute(
-        "INSERT INTO \"User\" (name, login, password) VALUES (%s, %s, %s) RETURNING id, name, login;",
-        (user.name, user.login, user.password)
+        'INSERT INTO "User" (name, login, password_hash) VALUES (%s, %s, %s) RETURNING id, name, login;',
+        (user.name, user.login, hashed_password)
     )
     new_user = cur.fetchone()
     conn.commit()
@@ -135,6 +155,28 @@ def create_user(user: UserCreate):
     conn.close()
     return new_user
 
+# Эндпоинт для обновления пользователя (с хешированием пароля)
+@app.put("/users/{user_id}", response_model=UserResponse, tags=["users"])
+def update_user(user_id: int, user: UserCreate):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Хэшируем новый пароль
+    hashed_password = hash_password(user.password)
+
+    cur.execute(
+        'UPDATE "User" SET name = %s, login = %s, password_hash = %s WHERE id = %s RETURNING id, name, login;',
+        (user.name, user.login, hashed_password, user_id)
+    )
+    updated_user = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
+    
+    if updated_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return updated_user
 # Эндпоинт для получения всех пользователей
 @app.get("/users/", response_model=list[UserResponse], tags=["users"])
 def get_users():
@@ -268,24 +310,81 @@ from datetime import datetime
 def create_suggestion(suggestion: SuggestionCreate):
     conn = get_db_connection()
     cur = conn.cursor()
+
+    try:
+        # Проверяем, существует ли user_id в таблице User
+        cur.execute("SELECT id FROM \"User\" WHERE id = %s;", (suggestion.user_id,))
+        user = cur.fetchone()
+
+        # Если user_id не найден, возвращаем ошибку 404
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Вставляем новое предложение
+        cur.execute(
+            """
+            INSERT INTO "Suggestions" (text, user_id, state, datetime, score, title)
+            VALUES (%s, %s, 'New', NOW(), 0, %s)  -- Заменяем на 0 или другое значение по умолчанию, если score отсутствует
+            RETURNING id, text, user_id, state, datetime, score, title;
+            """,
+            (suggestion.text, suggestion.title)
+        )
+        new_suggestion = cur.fetchone()
+        conn.commit()
+
+        return new_suggestion
+
+    except HTTPException as e:
+        # Пробрасываем HTTPException для обработки FastAPI
+        raise e
+    except Exception as e:
+        # Логируем ошибку для разработки
+        print(f"Error occurred: {str(e)}")  # Можно заменить на логирование
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+    finally:
+        # Закрываем соединение с базой данных
+        try:
+            cur.close()
+        except Exception as close_e:
+            print(f"Error closing cursor: {str(close_e)}")
+        try:
+            conn.close()
+        except Exception as close_e:
+            print(f"Error closing connection: {str(close_e)}")
+
+
+from datetime import datetime
+
+@app.get("/suggestions/", response_model=list[SuggestionResponse], tags=["suggestions"])
+def get_suggestions(sort_by_score: bool = True):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    order = "DESC" if sort_by_score else "ASC"
+
     cur.execute(
+        f"""
+        SELECT id, text, user_id, state, datetime, score, title
+        FROM "Suggestions"
+        ORDER BY score {order};
         """
-        INSERT INTO "Suggestions" (text, user_id, state, datetime, score, title)
-        VALUES (%s, %s, %s, NOW(), %s, %s)
-        RETURNING id, text, user_id, state, datetime, score, title;
-        """,
-        (suggestion.text, suggestion.user_id, "New", suggestion.score, suggestion.title)
     )
-    new_suggestion = cur.fetchone()
-    conn.commit()
+    suggestions = cur.fetchall()
     cur.close()
     conn.close()
 
-    # Преобразование datetime в строку
-    new_suggestion_dict = dict(new_suggestion)
-    new_suggestion_dict['datetime'] = new_suggestion_dict['datetime'].strftime('%Y-%m-%d %H:%M:%S')
-
-    return new_suggestion_dict
+    return [
+        {
+            "id": row[0],
+            "text": row[1],
+            "user_id": row[2],
+            "state": row[3],
+            "datetime": row[4].isoformat() if row[4] else None,  # Преобразуем datetime в строку
+            "score": row[5],
+            "title": row[6] or "",  # Заменяем None на пустую строку
+        }
+        for row in suggestions
+    ]
 
 
 
@@ -300,6 +399,10 @@ def get_suggestion(suggestion_id: int):
     conn.close()
     if suggestion is None:
         raise HTTPException(status_code=404, detail="Suggestion not found")
+
+    # Преобразование datetime в строку
+    suggestion['datetime'] = suggestion['datetime'].strftime('%Y-%m-%d %H:%M:%S')
+
     return suggestion
 
 # Эндпоинт для обновления предложения
